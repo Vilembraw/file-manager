@@ -5,30 +5,83 @@
 #include <unistd.h>
 #include <string.h>
 
-
 //gcc -lncurses filemanager.c
 
 #define MAX_FILES 1000
+#define MAX_FILENAME_LENGTH 100
 
-void list_dirents(const char* path, char dirents[MAX_FILES][100], int *count){
+int compare_dir(const char *str1, const char *str2){
+    int is_dir1 = (str1[0] == '/');
+    int is_dir2 = (str2[0] == '/');
+
+    if(is_dir1 && !is_dir2)
+        return -1; // str1 
+    else if(!is_dir1 && is_dir2)
+        return 1; // str2
+    else 
+        return strcmp(str1, str2); //alphabetical -> /.. is first
+    
+}
+
+void bubble_sort(char arr[MAX_FILES][MAX_FILENAME_LENGTH], int n, int (*compare)(const char *, const char *)){
+    for (int i = 0; i < n - 1; i++) {
+        for (int j = 0; j < n - i - 1; j++) {
+            if (compare(arr[j], arr[j + 1]) > 0) {
+                char temp[MAX_FILENAME_LENGTH];
+                strcpy(temp, arr[j]);
+                strcpy(arr[j], arr[j + 1]);
+                strcpy(arr[j + 1], temp);
+            }
+        }
+    }
+}
+void list_dirents(const char* path, char dirents[MAX_FILES][MAX_FILENAME_LENGTH], int *count){
     DIR *dir;
     struct dirent *entry;
     *count = 0;
-    
+
     if((dir = opendir(path)) != NULL){
         while((entry = readdir(dir)) != NULL && *count < MAX_FILES){
-            strcpy(dirents[*count],entry->d_name);
+            if (strcmp(entry->d_name, ".") == 0){
+                continue;
+            }
+
+            if(entry->d_type == DT_DIR){
+                char temp[100];
+                //clearowanie buffora
+                temp[0] = '\0';
+                strcat(temp,"/");
+                strcat(temp,entry->d_name);
+                strcpy(dirents[*count],temp);
+            }else{
+                strcpy(dirents[*count],entry->d_name);
+            }
+            
             *count = *count + 1;
         }
         closedir(dir);
-    }
+    }   
+    bubble_sort(dirents, *count, compare_dir);
+}
 
+
+void display_dirents(const char* path, char dirents[MAX_FILES][MAX_FILENAME_LENGTH],int count, int highlight){
+    for(int i = 0; i < count; i++){
+        if(highlight == i + 1) //present
+        {
+            attron(A_REVERSE);
+            mvprintw(i+1, 0,"%s", dirents[i]);
+            attroff(A_REVERSE);
+        }
+        else
+            mvprintw(i+1, 0,"%s", dirents[i]);
+    }
 }
 
 int main() {
-    char dirents[MAX_FILES][100];
+    char dirents[MAX_FILES][MAX_FILENAME_LENGTH];
     int dir_count = 0;
-    char current_path[100];
+    char current_path[1000];
 
 
     // window
@@ -52,22 +105,38 @@ int main() {
 
     getcwd(current_path, sizeof(current_path));
     list_dirents(current_path,dirents,&dir_count);
-    refresh();
-   
+
     //listing and moving 
     int ch;
+    int highlight = 1;
+    display_dirents(current_path, dirents, dir_count, highlight);
+    refresh();
     while(1)
     {
         ch = wgetch(win);
         switch(ch){
+            case KEY_UP:
+                if(highlight == 1)
+                    highlight = dir_count; //goes to last o
+                else
+                    highlight--;
+                break;
+            case KEY_DOWN:
+                if(highlight == dir_count)
+                    highlight = 1; //return to first 
+                else
+                    highlight++;
+                break;
             default:
-            mvprintw(5, 5,"%c", (char)ch);
-            refresh();
-			break;
+                refresh();
+                break;
         }
 
         if(ch == 'q')
             break;
+
+        display_dirents(current_path, dirents, dir_count, highlight);
+        refresh();
     }
 
     endwin();
