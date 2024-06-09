@@ -4,7 +4,7 @@
 #include <dirent.h>
 #include <unistd.h>
 #include <string.h>
-
+#include <sys/stat.h>
 //gcc -lncurses filemanager.c
 
 #define MAX_FILES 1000
@@ -60,6 +60,11 @@ void list_dirents(const char* path, char dirents[MAX_FILES][MAX_FILENAME_LENGTH]
             *count = *count + 1;
         }
         closedir(dir);
+    }
+    else{
+        clear();
+        refresh();
+        mvprintw(25, 25,"to nie folder");
     }   
     bubble_sort(dirents, *count, compare_dir);
 }
@@ -110,6 +115,7 @@ int main() {
     int ch;
     int highlight = 1;
     display_dirents(current_path, dirents, dir_count, highlight);
+    
     refresh();
     while(1)
     {
@@ -117,7 +123,7 @@ int main() {
         switch(ch){
             case KEY_UP:
                 if(highlight == 1)
-                    highlight = dir_count; //goes to last o
+                    highlight = dir_count; //goes to last 
                 else
                     highlight--;
                 break;
@@ -126,6 +132,52 @@ int main() {
                     highlight = 1; //return to first 
                 else
                     highlight++;
+                break;
+            case KEY_RIGHT:
+                char* name = dirents[highlight-1];
+                int is_dir = (name[0] == '/');
+
+                if(is_dir){ //check if dir
+                    if(highlight != 1){
+                        strcat(current_path,"/");
+                        strcat(current_path,dirents[highlight-1]);
+                        chdir(current_path);
+                        //clearnig buffor
+                        for(int i = 0; i < MAX_FILES; i++){
+                            memset(dirents[i], '\0', MAX_FILENAME_LENGTH);
+                        }
+                        highlight = 1;
+                        list_dirents(current_path,dirents,&dir_count);
+                        refresh();
+                        clear();
+                        display_dirents(current_path, dirents, dir_count, highlight);
+                    }else{
+                        highlight = 1;
+                        chdir("..");
+                        getcwd(current_path, sizeof(current_path));
+                        list_dirents(current_path,dirents,&dir_count);
+                        refresh();
+                        clear();
+                        display_dirents(current_path, dirents, dir_count, highlight);
+                        
+                    }
+                }else{
+                    // clear();
+                    // mvprintw(5, 10, "Plik");
+                    // refresh();
+                }
+                break;
+            case KEY_LEFT:
+                highlight = 1;
+                chdir("..");
+                getcwd(current_path, sizeof(current_path));
+                list_dirents(current_path,dirents,&dir_count);
+                refresh();
+                clear();
+                display_dirents(current_path, dirents, dir_count, highlight);
+                break;
+            case KEY_F(1):
+                
                 break;
             default:
                 refresh();
