@@ -5,10 +5,13 @@
 #include <unistd.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <fcntl.h>
 //gcc -lncurses filemanager.c
 
 #define MAX_FILES 1000
 #define MAX_FILENAME_LENGTH 100
+#define BUFFOR_LENGTH 100
+#define MAX_PATH_LENGTH 1000
 
 int compare_dir(const char *str1, const char *str2){
     int is_dir1 = (str1[0] == '/');
@@ -35,6 +38,7 @@ void bubble_sort(char arr[MAX_FILES][MAX_FILENAME_LENGTH], int n, int (*compare)
         }
     }
 }
+
 void list_dirents(const char* path, char dirents[MAX_FILES][MAX_FILENAME_LENGTH], int *count){
     DIR *dir;
     struct dirent *entry;
@@ -48,78 +52,131 @@ void list_dirents(const char* path, char dirents[MAX_FILES][MAX_FILENAME_LENGTH]
 
             if(entry->d_type == DT_DIR){
                 char temp[100];
-                //clearowanie buffora
                 temp[0] = '\0';
                 strcat(temp,"/");
                 strcat(temp,entry->d_name);
                 strcpy(dirents[*count],temp);
-            }else{
+            }
+            else{
                 strcpy(dirents[*count],entry->d_name);
             }
-            
+
             *count = *count + 1;
         }
         closedir(dir);
-    }
-    else{
-        clear();
-        refresh();
-        mvprintw(25, 25,"to nie folder");
     }   
     bubble_sort(dirents, *count, compare_dir);
 }
 
 
-void display_dirents(const char* path, char dirents[MAX_FILES][MAX_FILENAME_LENGTH],int count, int highlight){
+void display_dirents(const char* path, char dirents[MAX_FILES][MAX_FILENAME_LENGTH],int count, int highlight, WINDOW* mainscreen){
     for(int i = 0; i < count; i++){
         if(highlight == i + 1) //present
         {
-            attron(A_REVERSE);
-            mvprintw(i+1, 0,"%s", dirents[i]);
-            attroff(A_REVERSE);
+            wattron(mainscreen,A_REVERSE);
+            mvwprintw(mainscreen, i+1, 1,"%s", dirents[i]);
+            wattroff(mainscreen,A_REVERSE);
         }
         else
-            mvprintw(i+1, 0,"%s", dirents[i]);
+            mvwprintw(mainscreen, i+1, 1,"%s", dirents[i]);
     }
+    wrefresh(mainscreen);
 }
 
-int main() {
-    char dirents[MAX_FILES][MAX_FILENAME_LENGTH];
-    int dir_count = 0;
-    char current_path[1000];
 
+int copy_files(char* src_path, char* dest_path){
 
+    //read
+    int fd_read = open(src_path, O_RDONLY);
+    if(fd_read < 0){
+        perror("open");
+        return -1;
+    }
+    //write + creating if dest not exist
+    int fd_write = open(dest_path, O_WRONLY | O_CREAT, 0666);
+    if(fd_write < 0){
+        perror("write");
+        return -1;
+    }
+
+    char buffor[BUFFOR_LENGTH];
+    unsigned bytes;
+    while((bytes = read(fd_read, buffor, BUFFOR_LENGTH - 1))){
+        write(fd_write, buffor, strlen(buffor));
+        memset(buffor,'\0', BUFFOR_LENGTH);
+    }
+    close(fd_read);
+    close(fd_write);
+}
+
+void copy_dialog(char* src_path){
     // window
-
     int nlines = 20;
     int ncols = 20;
     int y0 = 10;
     int x0 = 10;
     WINDOW* win;
+    win = newwin(nlines,ncols,y0,x0);
+    box(win,0,0);
+    wbkgd(win, COLOR_PAIR(2));
+    wprintw(win,"TO WHERE?");
+    echo();
+    touchwin(win);
+    char dest_path[MAX_PATH_LENGTH];
+    while(1){
+        memset(dest_path, '\0', 100);
+        mvwgetstr(win,10,10,dest_path); //have to be full path for now
+        if(strlen(dest_path) > 0)
+            break;
+    }
+    
+    mvwprintw(win,5,5,dest_path);
+    wgetch(win);
+
+    copy_files(src_path,dest_path);
+    
+    werase(win);
+    wrefresh(win);
+    delwin(win);
+}
+
+
+int main() {
+    char dirents[MAX_FILES][MAX_FILENAME_LENGTH];
+    int dir_count = 0;
+    char current_path[MAX_PATH_LENGTH];
+
+
 
     //initialize ncurses  
     
     initscr();
     noecho();
     cbreak();
-
-
-    win = newwin(nlines,ncols,y0,x0);
-    keypad(win, TRUE);
-    mvprintw(0, 0, "MENU");
-
+    start_color();
+    init_pair(1, COLOR_WHITE, COLOR_BLACK);
+    init_pair(2, COLOR_WHITE, COLOR_RED);  
+    
+    //fullscreen
+    WINDOW* mainscreen = newwin(0,0,0,0);
+    wbkgd(mainscreen, COLOR_PAIR(1));
+    box(mainscreen, 0, 0);
+    keypad(mainscreen, TRUE);
+    nodelay(mainscreen, TRUE);
+    mvwprintw(mainscreen,0, 0, "MENU");
+    
     getcwd(current_path, sizeof(current_path));
     list_dirents(current_path,dirents,&dir_count);
 
-    //listing and moving 
     int ch;
     int highlight = 1;
-    display_dirents(current_path, dirents, dir_count, highlight);
+    display_dirents(current_path, dirents, dir_count, highlight, mainscreen);
     
-    refresh();
     while(1)
     {
-        ch = wgetch(win);
+        
+        touchwin(mainscreen);
+        ch = wgetch(mainscreen);
         switch(ch){
             case KEY_UP:
                 if(highlight == 1)
@@ -134,6 +191,7 @@ int main() {
                     highlight++;
                 break;
             case KEY_RIGHT:
+                //selected option = highlight - 1 
                 char* name = dirents[highlight-1];
                 int is_dir = (name[0] == '/');
 
@@ -148,23 +206,19 @@ int main() {
                         }
                         highlight = 1;
                         list_dirents(current_path,dirents,&dir_count);
-                        refresh();
-                        clear();
-                        display_dirents(current_path, dirents, dir_count, highlight);
+                        werase(mainscreen);
+                        box(mainscreen, 0, 0);
+                        display_dirents(current_path, dirents, dir_count, highlight, mainscreen);
                     }else{
                         highlight = 1;
                         chdir("..");
                         getcwd(current_path, sizeof(current_path));
                         list_dirents(current_path,dirents,&dir_count);
-                        refresh();
-                        clear();
-                        display_dirents(current_path, dirents, dir_count, highlight);
+                        werase(mainscreen);
+                        box(mainscreen, 0, 0);
+                        display_dirents(current_path, dirents, dir_count, highlight, mainscreen);
                         
                     }
-                }else{
-                    // clear();
-                    // mvprintw(5, 10, "Plik");
-                    // refresh();
                 }
                 break;
             case KEY_LEFT:
@@ -172,25 +226,26 @@ int main() {
                 chdir("..");
                 getcwd(current_path, sizeof(current_path));
                 list_dirents(current_path,dirents,&dir_count);
-                refresh();
-                clear();
-                display_dirents(current_path, dirents, dir_count, highlight);
+                werase(mainscreen);
+                box(mainscreen, 0, 0);
+                display_dirents(current_path, dirents, dir_count, highlight, mainscreen);
                 break;
             case KEY_F(1):
-                
+                char src_path[MAX_PATH_LENGTH];
+                strcpy(src_path,current_path);
+                strcat(src_path,"/");
+                strcat(src_path,dirents[highlight-1]);
+                copy_dialog(src_path);
+                noecho();
                 break;
-            default:
-                refresh();
-                break;
+
         }
 
         if(ch == 'q')
             break;
 
-        display_dirents(current_path, dirents, dir_count, highlight);
-        refresh();
+        display_dirents(current_path, dirents, dir_count, highlight, mainscreen);
     }
-
     endwin();
     return 0;
 }
