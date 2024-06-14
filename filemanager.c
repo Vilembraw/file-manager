@@ -171,7 +171,8 @@ void copy_dialog(char* src_path, char* name){
             strcat(new_src,dirents[i]);
             copy_file(new_src,new_dest);
         }
-    }else{
+    }
+    else{
         copy_file(src_path,dest_path);
     }
     
@@ -181,17 +182,53 @@ void copy_dialog(char* src_path, char* name){
     delwin(win);
 }
 
-int delete_file(char* src_path){
-    //function from stdio.h
-    if(remove(src_path) == 0){
-        //success dialog?
-    } 
-    else{
-        perror("delete");
-        return -1;
-    }
+int delete_files(char* src_path, char* name){
+    int is_dir = (name[0] == '/');
+    char dirents[MAX_FILES][MAX_FILENAME_LENGTH];
+    int dir_count = 0;
+    char new_src[MAX_PATH_LENGTH];
+    if(is_dir){
+        list_dirents(src_path,dirents,&dir_count);
+        for(int i = 1; i < dir_count; i++){
+            memset(new_src,'\0',MAX_PATH_LENGTH);
+            strcpy(new_src,src_path);
+            strcat(new_src,"/");
+            strcat(new_src,dirents[i]);
+            if(remove(new_src) == 0){
+                
+            }
+            else{
+                perror("delete file");
+                return -1;
+            }
+        }
+
+        if(rmdir(src_path) == 0){
+            //success
+        }
+        else{
+            perror("delete dir");
+            return -1;
+        }
         
+    }else{
+        if(remove(src_path) == 0){
+            //success dialog?
+        } 
+        else{
+            perror("delete file");
+            return -1;
+        }
+    }
+
 }
+
+void move_files(char* src_path, char* name){
+    copy_dialog(src_path,name);
+    delete_files(src_path,name);
+}
+
+
 
 int main() {
     char dirents[MAX_FILES][MAX_FILENAME_LENGTH];
@@ -223,7 +260,7 @@ int main() {
     int ch;
     int highlight = 1;
     display_dirents(current_path, dirents, dir_count, highlight, mainscreen);
-    
+    char src_path[MAX_PATH_LENGTH];
     while(1)
     {
         
@@ -231,18 +268,21 @@ int main() {
         ch = wgetch(mainscreen);
         switch(ch){
             case KEY_UP:
+                //moving up
                 if(highlight == 1)
                     highlight = dir_count; //goes to last 
                 else
                     highlight--;
                 break;
             case KEY_DOWN:
+                //moving down
                 if(highlight == dir_count)
                     highlight = 1; //return to first 
                 else
                     highlight++;
                 break;
             case KEY_RIGHT:
+                //moving forward
                 //selected option = highlight - 1 
                 char* name = dirents[highlight-1];
                 int is_dir = (name[0] == '/');
@@ -262,6 +302,7 @@ int main() {
                         box(mainscreen, 0, 0);
                         display_dirents(current_path, dirents, dir_count, highlight, mainscreen);
                     }else{
+                        //moving backward on /..
                         highlight = 1;
                         chdir("..");
                         getcwd(current_path, sizeof(current_path));
@@ -274,6 +315,7 @@ int main() {
                 }
                 break;
             case KEY_LEFT:
+                //moving backward
                 highlight = 1;
                 chdir("..");
                 getcwd(current_path, sizeof(current_path));
@@ -283,14 +325,41 @@ int main() {
                 display_dirents(current_path, dirents, dir_count, highlight, mainscreen);
                 break;
             case KEY_F(1):
-                char src_path[MAX_PATH_LENGTH];
+                //copying
+                memset(src_path,'\0',MAX_PATH_LENGTH);
                 strcpy(src_path,current_path);
                 strcat(src_path,"/");
                 strcat(src_path,dirents[highlight-1]);
                 copy_dialog(src_path,dirents[highlight-1]);
                 noecho();
                 break;
-
+            case KEY_F(2):
+                //move
+                memset(src_path,'\0',MAX_PATH_LENGTH);
+                strcpy(src_path,current_path);
+                strcat(src_path,"/");
+                strcat(src_path,dirents[highlight-1]);
+                move_files(src_path,dirents[highlight-1]);
+                noecho();
+                list_dirents(current_path,dirents,&dir_count);
+                werase(mainscreen);
+                box(mainscreen, 0, 0);
+                display_dirents(current_path, dirents, dir_count, highlight, mainscreen);
+                highlight--;
+                break;
+            case KEY_F(3):
+                //delete
+                memset(src_path,'\0',MAX_PATH_LENGTH);
+                strcpy(src_path,current_path);
+                strcat(src_path,"/");
+                strcat(src_path,dirents[highlight-1]);
+                delete_files(src_path,dirents[highlight-1]);
+                list_dirents(current_path,dirents,&dir_count);
+                werase(mainscreen);
+                box(mainscreen, 0, 0);
+                display_dirents(current_path, dirents, dir_count, highlight, mainscreen);
+                highlight--;
+                break;
         }
 
         if(ch == 'q')
