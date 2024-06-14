@@ -10,7 +10,7 @@
 
 #define MAX_FILES 1000
 #define MAX_FILENAME_LENGTH 100
-#define BUFFOR_LENGTH 100
+#define BUFFOR_LENGTH 5000
 #define MAX_PATH_LENGTH 1000
 
 int compare_dir(const char *str1, const char *str2){
@@ -84,35 +84,52 @@ void display_dirents(const char* path, char dirents[MAX_FILES][MAX_FILENAME_LENG
 }
 
 
-int copy_files(char* src_path, char* dest_path){
-
+int copy_file(char* src_path, char* dest_path){
     //read
     int fd_read = open(src_path, O_RDONLY);
     if(fd_read < 0){
         perror("open");
+        close(fd_read);
         return -1;
     }
     //write + creating if dest not exist
-    int fd_write = open(dest_path, O_WRONLY | O_CREAT, 0666);
+    int fd_write = open(dest_path, O_WRONLY | O_CREAT, 0775);
     if(fd_write < 0){
-        perror("write");
+        perror(dest_path);
+        close(fd_write);
         return -1;
     }
 
     char buffor[BUFFOR_LENGTH];
-    unsigned bytes;
-    while((bytes = read(fd_read, buffor, BUFFOR_LENGTH - 1))){
-        write(fd_write, buffor, strlen(buffor));
+    unsigned bytes_read, bytes_written;
+    while((bytes_read = read(fd_read, buffor, BUFFOR_LENGTH)) > 0){
+        bytes_written = write(fd_write, buffor, bytes_read);
         memset(buffor,'\0', BUFFOR_LENGTH);
+
+        if (bytes_written != bytes_read) {
+            // perror("write b");
+            perror(dest_path);
+            close(fd_read);
+            close(fd_write);
+            return -1;
+        }
     }
+
+    if (bytes_read < 0) {
+        perror("read");
+        close(fd_read);
+        close(fd_write);
+        return -1;
+    }
+
     close(fd_read);
     close(fd_write);
 }
 
-void copy_dialog(char* src_path){
+void copy_dialog(char* src_path, char* name){
     // window
-    int nlines = 20;
-    int ncols = 20;
+    int nlines = 25;
+    int ncols = 50;
     int y0 = 10;
     int x0 = 10;
     WINDOW* win;
@@ -123,8 +140,14 @@ void copy_dialog(char* src_path){
     echo();
     touchwin(win);
     char dest_path[MAX_PATH_LENGTH];
+    char dirents[MAX_FILES][MAX_FILENAME_LENGTH];
+    char new_dest[MAX_PATH_LENGTH];
+    char new_src[MAX_PATH_LENGTH];
+    int dir_count = 0;
+    
+    list_dirents(src_path,dirents,&dir_count);
     while(1){
-        memset(dest_path, '\0', 100);
+        memset(dest_path, '\0', MAX_PATH_LENGTH);
         mvwgetstr(win,10,10,dest_path); //have to be full path for now
         if(strlen(dest_path) > 0)
             break;
@@ -132,14 +155,43 @@ void copy_dialog(char* src_path){
     
     mvwprintw(win,5,5,dest_path);
     wgetch(win);
+    
+    int is_dir = (name[0] == '/');
+    if(is_dir){
+        for(int i = 1; i < dir_count; i++){
+            memset(new_dest,'\0', MAX_PATH_LENGTH);
+            strcpy(new_dest,dest_path);
+            strcat(new_dest,name);
+            mkdir(new_dest, 0775);
+            strcat(new_dest,"/");
+            strcat(new_dest,dirents[i]);
 
-    copy_files(src_path,dest_path);
+            strcpy(new_src,src_path);
+            strcat(new_src,"/");
+            strcat(new_src,dirents[i]);
+            copy_file(new_src,new_dest);
+        }
+    }else{
+        copy_file(src_path,dest_path);
+    }
+    
     
     werase(win);
     wrefresh(win);
     delwin(win);
 }
 
+int delete_file(char* src_path){
+    //function from stdio.h
+    if(remove(src_path) == 0){
+        //success dialog?
+    } 
+    else{
+        perror("delete");
+        return -1;
+    }
+        
+}
 
 int main() {
     char dirents[MAX_FILES][MAX_FILENAME_LENGTH];
@@ -235,7 +287,7 @@ int main() {
                 strcpy(src_path,current_path);
                 strcat(src_path,"/");
                 strcat(src_path,dirents[highlight-1]);
-                copy_dialog(src_path);
+                copy_dialog(src_path,dirents[highlight-1]);
                 noecho();
                 break;
 
