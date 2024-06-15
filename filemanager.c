@@ -88,14 +88,14 @@ int copy_file(char* src_path, char* dest_path){
     //read
     int fd_read = open(src_path, O_RDONLY);
     if(fd_read < 0){
-        perror("open");
+        perror("read fd: 91");
         close(fd_read);
         return -1;
     }
     //write + creating if dest not exist
     int fd_write = open(dest_path, O_WRONLY | O_CREAT, 0775);
     if(fd_write < 0){
-        perror(dest_path);
+        perror("write fd: 98");
         close(fd_write);
         return -1;
     }
@@ -107,8 +107,8 @@ int copy_file(char* src_path, char* dest_path){
         memset(buffor,'\0', BUFFOR_LENGTH);
 
         if (bytes_written != bytes_read) {
-            // perror("write b");
-            perror(dest_path);
+            perror("write b:110");
+            // perror(dest_path);
             close(fd_read);
             close(fd_write);
             return -1;
@@ -116,7 +116,7 @@ int copy_file(char* src_path, char* dest_path){
     }
 
     if (bytes_read < 0) {
-        perror("read");
+        perror("read b:119");
         close(fd_read);
         close(fd_write);
         return -1;
@@ -125,6 +125,38 @@ int copy_file(char* src_path, char* dest_path){
     close(fd_read);
     close(fd_write);
 }
+
+void copy_files(char* src_path, char* dest_path, char* name){
+    int is_dir = (name[0] == '/');
+    char dirents[MAX_FILES][MAX_FILENAME_LENGTH];
+    int dir_count = 0;
+    char new_src[MAX_PATH_LENGTH];
+    char new_dest[MAX_PATH_LENGTH];
+    char new_name[MAX_FILENAME_LENGTH];
+    if(is_dir){
+        list_dirents(src_path,dirents,&dir_count);
+        mkdir(dest_path,0775);
+        
+        for(int i = 1; i < dir_count; i++){
+            
+            strcpy(new_src, src_path);
+            strcat(new_src, "/");
+            strcat(new_src, dirents[i]);
+
+            strcpy(new_dest, dest_path);
+            strcat(new_dest, "/");
+            strcat(new_dest, dirents[i]);
+
+            copy_files(new_src, new_dest, dirents[i]);
+
+        }
+    }else{
+        copy_file(src_path,dest_path);
+    }
+
+}
+
+char* homechar(char* path);
 
 void copy_dialog(char* src_path, char* name){
     // window
@@ -140,43 +172,22 @@ void copy_dialog(char* src_path, char* name){
     echo();
     touchwin(win);
     char dest_path[MAX_PATH_LENGTH];
-    char dirents[MAX_FILES][MAX_FILENAME_LENGTH];
-    char new_dest[MAX_PATH_LENGTH];
-    char new_src[MAX_PATH_LENGTH];
-    int dir_count = 0;
-    
-    list_dirents(src_path,dirents,&dir_count);
     while(1){
         memset(dest_path, '\0', MAX_PATH_LENGTH);
         mvwgetstr(win,10,10,dest_path); //have to be full path for now
         if(strlen(dest_path) > 0)
             break;
     }
-    
-    mvwprintw(win,5,5,dest_path);
+    char* new_dest = homechar(dest_path);
+    mvwprintw(win,5,5,new_dest);
     wgetch(win);
     
     int is_dir = (name[0] == '/');
     if(is_dir){
-        for(int i = 1; i < dir_count; i++){
-            memset(new_dest,'\0', MAX_PATH_LENGTH);
-            strcpy(new_dest,dest_path);
-            strcat(new_dest,name);
-            mkdir(new_dest, 0775);
-            strcat(new_dest,"/");
-            strcat(new_dest,dirents[i]);
-
-            strcpy(new_src,src_path);
-            strcat(new_src,"/");
-            strcat(new_src,dirents[i]);
-            copy_file(new_src,new_dest);
-        }
+        strcat(new_dest,name);
     }
-    else{
-        copy_file(src_path,dest_path);
-    }
-    
-    
+    copy_files(src_path,new_dest,name);
+    free(new_dest);
     werase(win);
     wrefresh(win);
     delwin(win);
@@ -187,19 +198,31 @@ int delete_files(char* src_path, char* name){
     char dirents[MAX_FILES][MAX_FILENAME_LENGTH];
     int dir_count = 0;
     char new_src[MAX_PATH_LENGTH];
+    
     if(is_dir){
         list_dirents(src_path,dirents,&dir_count);
         for(int i = 1; i < dir_count; i++){
-            memset(new_src,'\0',MAX_PATH_LENGTH);
-            strcpy(new_src,src_path);
-            strcat(new_src,"/");
-            strcat(new_src,dirents[i]);
-            if(remove(new_src) == 0){
-                
+            char new_name[FILENAME_MAX];
+            strcpy(new_name,dirents[i]);
+            if(new_name[0] == '/'){
+                char new_src[MAX_FILENAME_LENGTH];
+                strcpy(new_src,src_path);
+                strcat(new_src,"/");
+                strcat(new_src,dirents[i]);
+                delete_files(new_src,new_name);
             }
             else{
-                perror("delete file");
-                return -1;
+                memset(new_src,'\0',MAX_PATH_LENGTH);
+                strcpy(new_src,src_path);
+                strcat(new_src,"/");
+                strcat(new_src,dirents[i]);
+                if(remove(new_src) == 0){
+                    
+                }
+                else{
+                    perror("delete file");
+                    return -1;
+                }
             }
         }
 
@@ -228,7 +251,22 @@ void move_files(char* src_path, char* name){
     delete_files(src_path,name);
 }
 
-
+char* homechar(char* path){
+    if(path[0] == '~')
+    {
+        const char* home_path= getenv("HOME");
+        size_t home_len = strlen(home_path);
+        size_t path_len = strlen(path);
+        
+        char* full_path = malloc(home_len + path_len);
+        strcpy(full_path, home_path);
+        strcat(full_path, path + 1);
+        return full_path;
+    }
+    else{
+        return path;
+    }
+}
 
 int main() {
     char dirents[MAX_FILES][MAX_FILENAME_LENGTH];
