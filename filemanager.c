@@ -6,6 +6,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <sys/wait.h>
 //gcc -lncurses filemanager.c
 
 #define MAX_FILES 1000
@@ -83,6 +84,25 @@ void display_dirents(const char* path, char dirents[MAX_FILES][MAX_FILENAME_LENG
     wrefresh(mainscreen);
 }
 
+size_t get_total_size(char* path){
+    int fd_read = open(path, O_RDONLY);
+    if(fd_read < 0){
+        perror("read fd: 89");
+        close(fd_read);
+        return -1;
+    }
+
+
+    size_t total_size = 0;
+    char buffor[BUFFOR_LENGTH];
+    unsigned bytes_read;
+    while((bytes_read = read(fd_read, buffor, BUFFOR_LENGTH)) > 0){
+        total_size += bytes_read;
+    }
+    return total_size;
+}
+
+
 
 int copy_file(char* src_path, char* dest_path){
     //read
@@ -100,31 +120,61 @@ int copy_file(char* src_path, char* dest_path){
         return -1;
     }
 
+
+    size_t total_size = get_total_size(src_path);
+    size_t total_bytes_written = 0;
     char buffor[BUFFOR_LENGTH];
-    unsigned bytes_read, bytes_written;
-    while((bytes_read = read(fd_read, buffor, BUFFOR_LENGTH)) > 0){
-        bytes_written = write(fd_write, buffor, bytes_read);
-        memset(buffor,'\0', BUFFOR_LENGTH);
+    size_t bytes_read, bytes_written;
 
-        if (bytes_written != bytes_read) {
-            perror("write b:110");
-            // perror(dest_path);
-            close(fd_read);
-            close(fd_write);
-            return -1;
-        }
+    int nlines = 10;
+    int ncols = 30;
+    int y0 = 25;
+    int x0 = 10;
+        WINDOW* progress_win;
+        progress_win = newwin(nlines,ncols,y0,x0);
+        box(progress_win,0,0);
+        wbkgd(progress_win, COLOR_PAIR(3));
+        touchwin(progress_win);
+
+
+    pid_t pid = fork();
+    if(pid == 0){
+        while((bytes_read = read(fd_read, buffor, BUFFOR_LENGTH)) > 0){
+            bytes_written = write(fd_write, buffor, bytes_read);
+            memset(buffor,'\0', BUFFOR_LENGTH);
+
+            if (bytes_written != bytes_read) {
+                perror("write b:110");
+                // perror(dest_path);
+                close(fd_read);
+                close(fd_write);
+                delwin(progress_win);
+                return -1;
+            }
+            total_bytes_written += bytes_written;
+            size_t progress = total_bytes_written*100/total_size;
+            mvwprintw(progress_win, 5, 5, "Progress: %zu%%", progress); 
+            wrefresh(progress_win);
+        }       
     }
-
+    else if(pid > 0){
+        int status;
+        waitpid(pid, &status, 0);
+        close(fd_read);
+        close(fd_write);
+    }
     if (bytes_read < 0) {
         perror("read b:119");
         close(fd_read);
         close(fd_write);
+        delwin(progress_win);
         return -1;
     }
 
-    close(fd_read);
-    close(fd_write);
+
+    delwin(progress_win);   
 }
+
 
 void copy_files(char* src_path, char* dest_path, char* name){
     int is_dir = (name[0] == '/');
@@ -138,7 +188,7 @@ void copy_files(char* src_path, char* dest_path, char* name){
         mkdir(dest_path,0775);
         
         for(int i = 1; i < dir_count; i++){
-            
+
             strcpy(new_src, src_path);
             strcat(new_src, "/");
             strcat(new_src, dirents[i]);
@@ -251,6 +301,7 @@ void move_files(char* src_path, char* name){
     delete_files(src_path,name);
 }
 
+
 char* homechar(char* path){
     if(path[0] == '~')
     {
@@ -283,6 +334,7 @@ int main() {
     start_color();
     init_pair(1, COLOR_WHITE, COLOR_BLACK);
     init_pair(2, COLOR_WHITE, COLOR_RED);  
+    init_pair(3, COLOR_MAGENTA, COLOR_GREEN);  
     
     //fullscreen
     WINDOW* mainscreen = newwin(0,0,0,0);
