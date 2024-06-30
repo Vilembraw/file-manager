@@ -6,7 +6,9 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <fcntl.h>
-#include <sys/wait.h>
+#include <pthread.h>
+#include <errno.h>
+
 //gcc -lncurses filemanager.c
 
 #define MAX_FILES 1000
@@ -14,13 +16,19 @@
 #define BUFFOR_LENGTH 5000
 #define MAX_PATH_LENGTH 1000
 
-int compare_dir(const char *str1, const char *str2){
-    int is_dir1 = (str1[0] == '/');
-    int is_dir2 = (str2[0] == '/');
 
-    if(is_dir1 && !is_dir2)
+int is_dir(const char* str1){
+    int is_dir1 = (str1[0] == '/');
+    if(is_dir1)
+        return 1;
+    else
+        return -1;
+}
+
+int compare_dir(const char *str1, const char *str2){
+    if(is_dir(str1) && !is_dir(str2))
         return -1; // str1 
-    else if(!is_dir1 && is_dir2)
+    else if(!is_dir(str1) && is_dir(str2))
         return 1; // str2
     else 
         return strcmp(str1, str2); //alphabetical -> /.. is first
@@ -84,7 +92,7 @@ void display_dirents(const char* path, char dirents[MAX_FILES][MAX_FILENAME_LENG
     wrefresh(mainscreen);
 }
 
-size_t get_total_size(char* path){
+off_t get_total_size(char* path){
     int fd_read = open(path, O_RDONLY);
     if(fd_read < 0){
         perror("read fd: 89");
@@ -93,7 +101,7 @@ size_t get_total_size(char* path){
     }
 
 
-    size_t total_size = 0;
+    off_t total_size = 0;
     char buffor[BUFFOR_LENGTH];
     unsigned bytes_read;
     while((bytes_read = read(fd_read, buffor, BUFFOR_LENGTH)) > 0){
@@ -102,79 +110,91 @@ size_t get_total_size(char* path){
     return total_size;
 }
 
+#define NUM_THREADS 4
 
+typedef struct{
+    int fd_read;
+    int fd_write;
+}fdescriptors;
 
-int copy_file(char* src_path, char* dest_path){
+void* copy_file_thread(void* arg) {
+    fdescriptors* fds = (fdescriptors*)arg;
+    char buffor[BUFFOR_LENGTH];
+    ssize_t bytes_read, bytes_written;
+
+    while((bytes_read = read(fds->fd_read, buffor, BUFFOR_LENGTH)) > 0){
+        bytes_written = write(fds->fd_write, buffor, bytes_read);
+        if(bytes_written != bytes_read) {
+            perror("Thread: 128");
+            close(fds->fd_read);
+            close(fds->fd_write);
+        }
+    }
+    close(fds->fd_read);
+    close(fds->fd_write);
+}
+
+void copy_file(char* src_path, char* dest_path){
     //read
     int fd_read = open(src_path, O_RDONLY);
     if(fd_read < 0){
-        perror("read fd: 91");
+        perror("read fd: 140");
         close(fd_read);
-        return -1;
     }
     //write + creating if dest not exist
     int fd_write = open(dest_path, O_WRONLY | O_CREAT, 0775);
     if(fd_write < 0){
-        perror("write fd: 98");
+        perror("write fd: 147");
         close(fd_write);
-        return -1;
     }
 
 
-    size_t total_size = get_total_size(src_path);
+    off_t total_size = get_total_size(src_path);
     size_t total_bytes_written = 0;
     char buffor[BUFFOR_LENGTH];
     size_t bytes_read, bytes_written;
 
-    int nlines = 10;
-    int ncols = 30;
-    int y0 = 25;
-    int x0 = 10;
-        WINDOW* progress_win;
-        progress_win = newwin(nlines,ncols,y0,x0);
-        box(progress_win,0,0);
-        wbkgd(progress_win, COLOR_PAIR(3));
-        touchwin(progress_win);
+        // int nlines = 10;
+        // int ncols = 30;
+        // int y0 = 25;
+        // int x0 = 10;
+        // WINDOW* progress_win;
+        // progress_win = newwin(nlines,ncols,y0,x0);
+        // box(progress_win,0,0);
+        // wbkgd(progress_win, COLOR_PAIR(3));
+        // touchwin(progress_win);
 
+    pthread_t threads[NUM_THREADS];
+    fdescriptors fds[NUM_THREADS];
 
-    pid_t pid = fork();
-    if(pid == 0){
-        while((bytes_read = read(fd_read, buffor, BUFFOR_LENGTH)) > 0){
-            bytes_written = write(fd_write, buffor, bytes_read);
-            memset(buffor,'\0', BUFFOR_LENGTH);
+    off_t chunk_size = total_size/NUM_THREADS;
+    off_t remaining_bytes= total_size%NUM_THREADS;
+    off_t offset = 0;
 
-            if (bytes_written != bytes_read) {
-                perror("write b:110");
-                // perror(dest_path);
-                close(fd_read);
-                close(fd_write);
-                delwin(progress_win);
-                return -1;
-            }
-            total_bytes_written += bytes_written;
-            size_t progress = total_bytes_written*100/total_size;
-            mvwprintw(progress_win, 5, 5, "Progress: %zu%%", progress); 
-            wrefresh(progress_win);
-        }       
-    }
-    else if(pid > 0){
-        int status;
-        waitpid(pid, &status, 0);
-        close(fd_read);
-        close(fd_write);
-    }
-    if (bytes_read < 0) {
-        perror("read b:119");
-        close(fd_read);
-        close(fd_write);
-        delwin(progress_win);
-        return -1;
+    for(int i = 0; i<NUM_THREADS; i++){
+        fds[i].fd_read = fd_read;
+        fds[i].fd_write = fd_write;
+
+        if(i==NUM_THREADS-1){
+            chunk_size += remaining_bytes;
+        }
+    
+    //setting fds offset pos
+    lseek(fd_read, offset, SEEK_SET);
+    lseek(fd_write, offset, SEEK_SET);
+
+    pthread_create(&threads[i], NULL, copy_file_thread, &fds[i]);
+    offset += chunk_size;
     }
 
+    for(int i = 0; i<NUM_THREADS; i++){
+        pthread_join(threads[i],NULL);
+    }
 
-    delwin(progress_win);   
+    close(fd_read);
+    close(fd_write);
+  
 }
-
 
 void copy_files(char* src_path, char* dest_path, char* name){
     int is_dir = (name[0] == '/');
