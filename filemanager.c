@@ -113,87 +113,84 @@ off_t get_total_size(char* path){
 #define NUM_THREADS 4
 
 typedef struct{
-    int fd_read;
-    int fd_write;
-}fdescriptors;
+    char src_path[MAX_PATH_LENGTH];
+    char dest_path[MAX_PATH_LENGTH];
+    off_t start_offset;
+    off_t end_offset;
+}copy_args;
 
 void* copy_file_thread(void* arg) {
-    fdescriptors* fds = (fdescriptors*)arg;
+    copy_args* cpyargs = (copy_args*)arg;
     char buffor[BUFFOR_LENGTH];
     ssize_t bytes_read, bytes_written;
-
-    while((bytes_read = read(fds->fd_read, buffor, BUFFOR_LENGTH)) > 0){
-        bytes_written = write(fds->fd_write, buffor, bytes_read);
-        if(bytes_written != bytes_read) {
-            perror("Thread: 128");
-            close(fds->fd_read);
-            close(fds->fd_write);
-        }
-    }
-    close(fds->fd_read);
-    close(fds->fd_write);
-}
-
-void copy_file(char* src_path, char* dest_path){
     //read
-    int fd_read = open(src_path, O_RDONLY);
+    int fd_read = open(cpyargs->src_path, O_RDONLY);
     if(fd_read < 0){
-        perror("read fd: 140");
+        perror("read fd: 129");
         close(fd_read);
     }
     //write + creating if dest not exist
-    int fd_write = open(dest_path, O_WRONLY | O_CREAT, 0775);
+    int fd_write = open(cpyargs->dest_path, O_WRONLY | O_CREAT, 0775);
     if(fd_write < 0){
-        perror("write fd: 147");
+        perror("write fd: 135");
         close(fd_write);
     }
 
+      //setting fds offset pos
+    lseek(fd_read, cpyargs->start_offset, SEEK_SET);
+    lseek(fd_write, cpyargs->start_offset, SEEK_SET);
 
+    off_t bytes_to_copy = cpyargs->end_offset - cpyargs->start_offset;
+    while(bytes_to_copy > 0){
+        bytes_read = read(fd_read, buffor, BUFFOR_LENGTH);
+        if(bytes_read < 0){
+            perror("Read B: 147");
+            break;
+        }
+        bytes_written = write(fd_write,buffor,bytes_read);
+        if(bytes_written < 0){
+            perror("Written B: 152");
+            break;
+        }
+
+        bytes_to_copy -= bytes_written;
+    }
+    close(fd_read);
+    close(fd_write);
+}
+
+void copy_file(char* src_path, char* dest_path){
     off_t total_size = get_total_size(src_path);
     size_t total_bytes_written = 0;
     char buffor[BUFFOR_LENGTH];
     size_t bytes_read, bytes_written;
 
-        // int nlines = 10;
-        // int ncols = 30;
-        // int y0 = 25;
-        // int x0 = 10;
-        // WINDOW* progress_win;
-        // progress_win = newwin(nlines,ncols,y0,x0);
-        // box(progress_win,0,0);
-        // wbkgd(progress_win, COLOR_PAIR(3));
-        // touchwin(progress_win);
 
     pthread_t threads[NUM_THREADS];
-    fdescriptors fds[NUM_THREADS];
+    copy_args cpyargs[NUM_THREADS];
 
     off_t chunk_size = total_size/NUM_THREADS;
     off_t remaining_bytes= total_size%NUM_THREADS;
     off_t offset = 0;
 
     for(int i = 0; i<NUM_THREADS; i++){
-        fds[i].fd_read = fd_read;
-        fds[i].fd_write = fd_write;
-
+        cpyargs[i].start_offset = offset;
         if(i==NUM_THREADS-1){
             chunk_size += remaining_bytes;
         }
-    
-    //setting fds offset pos
-    lseek(fd_read, offset, SEEK_SET);
-    lseek(fd_write, offset, SEEK_SET);
+        cpyargs[i].end_offset = offset + chunk_size;
+       
+        strcpy(cpyargs[i].dest_path, dest_path);
+        strcpy(cpyargs[i].src_path, src_path);
 
-    pthread_create(&threads[i], NULL, copy_file_thread, &fds[i]);
-    offset += chunk_size;
+        pthread_create(&threads[i], NULL, copy_file_thread, &cpyargs[i]);
+        offset += chunk_size;
     }
 
     for(int i = 0; i<NUM_THREADS; i++){
         pthread_join(threads[i],NULL);
     }
 
-    close(fd_read);
-    close(fd_write);
-  
 }
 
 void copy_files(char* src_path, char* dest_path, char* name){
