@@ -11,10 +11,10 @@
 
 //gcc -lncurses filemanager.c
 
-#define MAX_FILES 1000
-#define MAX_FILENAME_LENGTH 100
-#define BUFFOR_LENGTH 5000
-#define MAX_PATH_LENGTH 1000
+#define MAX_FILES 1024
+#define MAX_FILENAME_LENGTH 1024
+#define BUFFOR_LENGTH 1024
+#define MAX_PATH_LENGTH 1024
 
 
 int is_dir(const char* str1){
@@ -73,7 +73,9 @@ void list_dirents(const char* path, char dirents[MAX_FILES][MAX_FILENAME_LENGTH]
             *count = *count + 1;
         }
         closedir(dir);
-    }   
+    }else {
+        perror("dir open: 77    ");
+    } 
     bubble_sort(dirents, *count, compare_dir);
 }
 
@@ -119,6 +121,9 @@ typedef struct{
     off_t end_offset;
 }copy_args;
 
+float progress = 0;
+pthread_mutex_t progress_mutex = PTHREAD_MUTEX_INITIALIZER;
+
 void* copy_file_thread(void* arg) {
     copy_args* cpyargs = (copy_args*)arg;
     char buffor[BUFFOR_LENGTH];
@@ -128,12 +133,14 @@ void* copy_file_thread(void* arg) {
     if(fd_read < 0){
         perror("read fd: 129");
         close(fd_read);
+        return NULL;
     }
     //write + creating if dest not exist
     int fd_write = open(cpyargs->dest_path, O_WRONLY | O_CREAT, 0775);
     if(fd_write < 0){
         perror("write fd: 135");
         close(fd_write);
+        return NULL;
     }
 
       //setting fds offset pos
@@ -154,12 +161,19 @@ void* copy_file_thread(void* arg) {
         }
 
         bytes_to_copy -= bytes_written;
+
+
+        // progress
+        pthread_mutex_lock(&progress_mutex);
+        progress += bytes_written;
+        pthread_mutex_unlock(&progress_mutex);
     }
     close(fd_read);
     close(fd_write);
 }
 
-void copy_file(char* src_path, char* dest_path){
+void copy_file(char* src_path, char* dest_path, char* name){
+    progress = 0;
     off_t total_size = get_total_size(src_path);
     size_t total_bytes_written = 0;
     char buffor[BUFFOR_LENGTH];
@@ -187,10 +201,34 @@ void copy_file(char* src_path, char* dest_path){
         offset += chunk_size;
     }
 
+    WINDOW* progress_win;
+    progress_win = newwin(15,50,10,50);
+    box(progress_win,0,0);
+    wbkgd(progress_win, COLOR_PAIR(3));
+    mvwprintw(progress_win,1,1,"Copying %s",name);
+
+    float old_percent = -1.0;
+    while(progress < (float)total_size){
+        pthread_mutex_lock(&progress_mutex);
+        float current_percent = progress/(float)total_size * 100.0;
+        if(current_percent != old_percent){
+            mvwprintw(progress_win,7,25,"%.f%%", current_percent);
+            wrefresh(progress_win);
+            old_percent = current_percent;
+        }
+        pthread_mutex_unlock(&progress_mutex);
+    }
+
     for(int i = 0; i<NUM_THREADS; i++){
         pthread_join(threads[i],NULL);
     }
+    //completion
+    mvwprintw(progress_win, 2, 2, "100%% Complete");
+    wrefresh(progress_win);
+    usleep(500);
 
+    werase(progress_win);
+    delwin(progress_win);
 }
 
 void copy_files(char* src_path, char* dest_path, char* name){
@@ -218,7 +256,7 @@ void copy_files(char* src_path, char* dest_path, char* name){
 
         }
     }else{
-        copy_file(src_path,dest_path);
+        copy_file(src_path,dest_path,name);
     }
 
 }
@@ -226,37 +264,54 @@ void copy_files(char* src_path, char* dest_path, char* name){
 char* homechar(char* path);
 
 void copy_dialog(char* src_path, char* name){
-    // window
-    int nlines = 25;
-    int ncols = 50;
-    int y0 = 10;
-    int x0 = 10;
     WINDOW* win;
-    win = newwin(nlines,ncols,y0,x0);
+    win = newwin(15,50,10,50);
     box(win,0,0);
+    keypad(win,TRUE);
     wbkgd(win, COLOR_PAIR(2));
-    wprintw(win,"TO WHERE?");
-    echo();
+    mvwprintw(win,0,0,"COPY DIALOG");
+    mvwprintw(win,2,1,"EXAMPLE: ");
+    mvwprintw(win,3,1,"if dir:  ~/documents/");
+    mvwprintw(win,4,1,"if file: ~/pictures/");
+    char* str;
+
+    if(is_dir(name)){
+        str = "Copy directory:";
+    }else{
+        str = "Copy file:";
+    }
+    mvwprintw(win,6,1,str);
+    mvwprintw(win,7,1,src_path);
+    mvwprintw(win,9,1,"To:");
+
+    
     touchwin(win);
     char dest_path[MAX_PATH_LENGTH];
+    char ch = wgetch(win);
+    if(ch == 27)
+        return;
+    echo();
+    
     while(1){
         memset(dest_path, '\0', MAX_PATH_LENGTH);
-        mvwgetstr(win,10,10,dest_path); //have to be full path for now
+        mvwgetstr(win,10,1,dest_path);
         if(strlen(dest_path) > 0)
             break;
     }
     char* new_dest = homechar(dest_path);
-    mvwprintw(win,5,5,new_dest);
-    wgetch(win);
+
     
-    int is_dir = (name[0] == '/');
-    if(is_dir){
+    if(is_dir(name)){
+        strcat(new_dest,name);
+    }else{
+        strcat(new_dest,"/");
         strcat(new_dest,name);
     }
+
+    
     copy_files(src_path,new_dest,name);
     free(new_dest);
     werase(win);
-    wrefresh(win);
     delwin(win);
 }
 
@@ -320,20 +375,22 @@ void move_files(char* src_path, char* name){
 
 
 char* homechar(char* path){
+    char* full_path = NULL;
     if(path[0] == '~')
     {
         const char* home_path= getenv("HOME");
         size_t home_len = strlen(home_path);
-        size_t path_len = strlen(path);
+        size_t path_len = strlen(path + 1); 
         
-        char* full_path = malloc(home_len + path_len);
+        full_path = (char*)malloc(home_len + path_len + 1);
         strcpy(full_path, home_path);
         strcat(full_path, path + 1);
-        return full_path;
     }
     else{
-        return path;
+        full_path = (char*)malloc(strlen(path) + 1);
+        strcpy(full_path, path);
     }
+    return full_path;
 }
 
 int main() {
@@ -359,11 +416,11 @@ int main() {
     box(mainscreen, 0, 0);
     keypad(mainscreen, TRUE);
     nodelay(mainscreen, TRUE);
-    mvwprintw(mainscreen,0, 0, "MENU");
+    
     
     getcwd(current_path, sizeof(current_path));
     list_dirents(current_path,dirents,&dir_count);
-
+    mvwprintw(mainscreen,0, 0, current_path);
     int ch;
     int highlight = 1;
     display_dirents(current_path, dirents, dir_count, highlight, mainscreen);
@@ -392,13 +449,13 @@ int main() {
                 //moving forward
                 //selected option = highlight - 1 
                 char* name = dirents[highlight-1];
-                int is_dir = (name[0] == '/');
-
-                if(is_dir){ //check if dir
+                
+                if(is_dir(name)){ //check if dir
                     if(highlight != 1){
-                        strcat(current_path,"/");
+                        // strcat(current_path,"/");
                         strcat(current_path,dirents[highlight-1]);
                         chdir(current_path);
+                        getcwd(current_path, sizeof(current_path));
                         //clearnig buffor
                         for(int i = 0; i < MAX_FILES; i++){
                             memset(dirents[i], '\0', MAX_FILENAME_LENGTH);
@@ -407,6 +464,7 @@ int main() {
                         list_dirents(current_path,dirents,&dir_count);
                         werase(mainscreen);
                         box(mainscreen, 0, 0);
+                        mvwprintw(mainscreen,0, 0, current_path);
                         display_dirents(current_path, dirents, dir_count, highlight, mainscreen);
                     }else{
                         //moving backward on /..
@@ -417,7 +475,7 @@ int main() {
                         werase(mainscreen);
                         box(mainscreen, 0, 0);
                         display_dirents(current_path, dirents, dir_count, highlight, mainscreen);
-                        
+                        mvwprintw(mainscreen,0, 0, current_path);
                     }
                 }
                 break;
@@ -430,6 +488,7 @@ int main() {
                 werase(mainscreen);
                 box(mainscreen, 0, 0);
                 display_dirents(current_path, dirents, dir_count, highlight, mainscreen);
+                mvwprintw(mainscreen,0, 0, current_path);
                 break;
             case KEY_F(1):
                 //copying
