@@ -261,9 +261,9 @@ void copy_files(char* src_path, char* dest_path, char* name){
 
 }
 
-char* homechar(char* path);
+char* homechar(char* path,char* name);
 
-void copy_dialog(char* src_path, char* name){
+void dialog(char* src_path, char* name){
     WINDOW* win;
     win = newwin(15,50,10,50);
     box(win,0,0);
@@ -298,7 +298,7 @@ void copy_dialog(char* src_path, char* name){
         if(strlen(dest_path) > 0)
             break;
     }
-    char* new_dest = homechar(dest_path);
+    char* new_dest = homechar(dest_path,name);
 
     
     if(is_dir(name)){
@@ -369,25 +369,27 @@ int delete_files(char* src_path, char* name){
 }
 
 void move_files(char* src_path, char* name){
-    copy_dialog(src_path,name);
+    dialog(src_path,name);
     delete_files(src_path,name);
 }
 
 
-char* homechar(char* path){
+char* homechar(char* path,char* name){
     char* full_path = NULL;
+    size_t name_len = strlen(name);
     if(path[0] == '~')
     {
         const char* home_path= getenv("HOME");
         size_t home_len = strlen(home_path);
         size_t path_len = strlen(path + 1); 
         
-        full_path = (char*)malloc(home_len + path_len + 10);
+        
+        full_path = (char*)malloc(home_len + path_len + name_len);
         strcpy(full_path, home_path);
         strcat(full_path, path + 1);
     }
     else{
-        full_path = (char*)malloc(strlen(path) + 10);
+        full_path = (char*)malloc(strlen(path) + name_len);
         strcpy(full_path, path);
     }
     return full_path;
@@ -417,10 +419,12 @@ int main() {
     keypad(mainscreen, TRUE);
     nodelay(mainscreen, TRUE);
     
-    
+    int maxy= getmaxy(mainscreen);
+
     getcwd(current_path, sizeof(current_path));
     list_dirents(current_path,dirents,&dir_count);
     mvwprintw(mainscreen,0, 0, current_path);
+    mvwprintw(mainscreen,maxy-1, 1, "%s", "[F1] COPY   [F2] MOVE   [F3] DELETE");
     int ch;
     int highlight = 1;
     display_dirents(current_path, dirents, dir_count, highlight, mainscreen);
@@ -466,6 +470,7 @@ int main() {
                         box(mainscreen, 0, 0);
                         mvwprintw(mainscreen,0, 0, current_path);
                         display_dirents(current_path, dirents, dir_count, highlight, mainscreen);
+                        mvwprintw(mainscreen,maxy-1, 1, "%s", "[F1] COPY   [F2] MOVE   [F3] DELETE");
                     }else{
                         //moving backward on /..
                         highlight = 1;
@@ -476,6 +481,7 @@ int main() {
                         box(mainscreen, 0, 0);
                         display_dirents(current_path, dirents, dir_count, highlight, mainscreen);
                         mvwprintw(mainscreen,0, 0, current_path);
+                        mvwprintw(mainscreen,maxy-1, 1, "%s", "[F1] COPY   [F2] MOVE   [F3] DELETE");
                     }
                 }
                 break;
@@ -489,6 +495,7 @@ int main() {
                 box(mainscreen, 0, 0);
                 display_dirents(current_path, dirents, dir_count, highlight, mainscreen);
                 mvwprintw(mainscreen,0, 0, current_path);
+                mvwprintw(mainscreen,maxy-1, 1, "%s", "[F1] COPY   [F2] MOVE   [F3] DELETE");
                 break;
             case KEY_F(1):
                 //copying
@@ -496,7 +503,7 @@ int main() {
                 strcpy(src_path,current_path);
                 strcat(src_path,"/");
                 strcat(src_path,dirents[highlight-1]);
-                copy_dialog(src_path,dirents[highlight-1]);
+                dialog(src_path,dirents[highlight-1]);
                 noecho();
                 break;
             case KEY_F(2):
