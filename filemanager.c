@@ -382,12 +382,12 @@ char* homechar(char* path){
         size_t home_len = strlen(home_path);
         size_t path_len = strlen(path + 1); 
         
-        full_path = (char*)malloc(home_len + path_len + 1);
+        full_path = (char*)malloc(home_len + path_len + 10);
         strcpy(full_path, home_path);
         strcat(full_path, path + 1);
     }
     else{
-        full_path = (char*)malloc(strlen(path) + 1);
+        full_path = (char*)malloc(strlen(path) + 10);
         strcpy(full_path, path);
     }
     return full_path;
