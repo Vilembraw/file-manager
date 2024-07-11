@@ -263,23 +263,24 @@ void copy_files(char* src_path, char* dest_path, char* name){
 
 char* homechar(char* path,char* name);
 
-void dialog(char* src_path, char* name){
+bool canceled = 0;
+void dialog(char* src_path, char* name, char* type){
     WINDOW* win;
     win = newwin(15,50,10,50);
     box(win,0,0);
     keypad(win,TRUE);
     wbkgd(win, COLOR_PAIR(2));
-    mvwprintw(win,0,0,"COPY DIALOG");
+    mvwprintw(win,0,0,"%s", type);
     mvwprintw(win,2,1,"EXAMPLE: ");
     mvwprintw(win,3,1,"if dir:  ~/documents/");
     mvwprintw(win,4,1,"if file: ~/pictures/");
     char* str;
 
-    if(is_dir(name)){
-        str = "Copy directory:";
-    }else{
-        str = "Copy file:";
-    }
+        if(is_dir(name)){
+            str = "Directory:";
+        }else{
+            str = "File:";
+        }
     mvwprintw(win,6,1,str);
     mvwprintw(win,7,1,src_path);
     mvwprintw(win,9,1,"To:");
@@ -288,8 +289,11 @@ void dialog(char* src_path, char* name){
     touchwin(win);
     char dest_path[MAX_PATH_LENGTH];
     char ch = wgetch(win);
-    if(ch == 27)
+    if(ch == 27){
+        canceled = 1;
         return;
+    }
+        
     echo();
     
     while(1){
@@ -369,8 +373,14 @@ int delete_files(char* src_path, char* name){
 }
 
 void move_files(char* src_path, char* name){
-    dialog(src_path,name);
-    delete_files(src_path,name);
+    dialog(src_path,name,"MOVE");
+    if(canceled == 1){
+        canceled = 0;
+        return;
+    }else{
+        delete_files(src_path,name);
+    }
+    
 }
 
 
@@ -503,7 +513,7 @@ int main() {
                 strcpy(src_path,current_path);
                 strcat(src_path,"/");
                 strcat(src_path,dirents[highlight-1]);
-                dialog(src_path,dirents[highlight-1]);
+                dialog(src_path,dirents[highlight-1],"COPY");
                 noecho();
                 break;
             case KEY_F(2):
@@ -519,6 +529,7 @@ int main() {
                 box(mainscreen, 0, 0);
                 display_dirents(current_path, dirents, dir_count, highlight, mainscreen);
                 highlight--;
+                mvwprintw(mainscreen,maxy-1, 1, "%s", "[F1] COPY   [F2] MOVE   [F3] DELETE");
                 break;
             case KEY_F(3):
                 //delete
